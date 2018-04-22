@@ -1,7 +1,6 @@
 #encoding:utf-8
 
 import re
-import pandas as pd
 import csv
 import time
 import threading
@@ -71,17 +70,16 @@ def trainsample_read( trainsample_csv_file ):
             samples.put(sample_file[i])
     print(samples.qsize())
     '''
-    test = mp.Queue();
-
     time_1=time.time()
-    samples = list();
+    samples = [list() for n in range(830)]
+    print("len:%d"%len(samples))
     for i in range(len(sample_file)):
         if i>0:
-            samples.append(sample_file[i])
+            samples[int(sample_file[i][1])//100000].append(sample_file[i])
     time_2=time.time()
-    print(len(samples))
+    for i in samples:
+        print(len(i))
     print('list time:%f'%(time_2-time_1))
-
     return samples;
 '''
 def mp_search_train(uid,queue_id,train_queue1,train_queue2,mtched_train):
@@ -123,35 +121,44 @@ def mp_search_ad(aid,queue_id,mtched_ad):
         else:
             return ;
 '''
-def mp_search_train(uid,train_list,ind,length,mtched_train):
+mutex=threading.Lock()
+def mp_search_train(search_queue,searching_list,train_list_hash,search_result,timer):
     while 1:
-        id=ind
-        ind=ind+1
-        if mtched_train:
-            break
-        if id<length:
-            if uid==train_list[id][1]:
-                mtched_train=train_list[id][1]
-                del train_list[id]
+        uid=search_queue.get()
+        _hash=int(uid)//100000
+        while 1:
+            if not searching_list.count(_hash):
+                searching_list.append(_hash)
                 break
+        if not len(train_list_hash[_hash]):
+            continue;
         else:
-            break
+            for i in range(len(train_list_hash[_hash])):
+                _train=train_list_hash[_hash][i]
+                if uid==_train[1]:
+                    del train_list_hash[_hash][i]
+                    searching_list.remove(_hash)
+                    _train.append(uid)
+                    search_result.append(_train)
+                    _time=time.time()
+                    print("time:%f"%(_time-timer))
+                    timer=time.time()
+                    print("found:%d"%len(search_result))
+                    break
 
 if __name__ == '__main__':
 
     userdata_vw_file='../preliminary_contest_data/userFeature.data'
 
-    ad_queue1=addata_read('../preliminary_contest_data/adFeature.csv')
-    ad_queue2=mp.Queue()
-    print('ad queue init size:')
+    #ad_queue1=addata_read('../preliminary_contest_data/adFeature.csv')
+    #ad_queue2=mp.Queue()
+    #print('ad queue init size:')
     #print(ad_queue1.qsize())
-    print(len(ad_queue1))
+    #print(len(ad_queue1))
 
-    train_queue1=trainsample_read('../preliminary_contest_data/train.csv')
-    train_queue2=mp.Queue()
-    print('train queue init size:')
-    #print(train_queue1.qsize())
-    print(len(train_queue1))
+    train_list_hash=trainsample_read('../preliminary_contest_data/train.csv')
+    search_queue=mp.Queue(maxsize=50)
+    searching_list=mp.Manager().list()
 
     userdata_file = open(userdata_vw_file)
     train_users_file = open('train_user.data','w')
@@ -159,78 +166,28 @@ if __name__ == '__main__':
     users = list()
     user = list()
     cpu_count=4
-    #search_train_pool=Pool(cpu_count)
-    #search_ad_pool=Pool(mp.cpu_count())
-
-    n=0
 
     print('initialization finished')
 
-    mtched_train = mp.Manager().list()
-    mtched_ad = mp.Manager().list()
-    ind=mp.Value("d",0)
-    length=mp.Value("d",len(train_queue1))
-    for i in range(100):
-        print("processing :%d"%i)
-        time_start=time.time()
+    search_result = mp.Manager().list()
+
+    time_start = time.time()
+
+    for j in range(50):
+        p = mp.Process(target=mp_search_train, args=(search_queue,searching_list,train_list_hash,search_result,time_start,))
+    p.start()
+    while 1:
         line = userdata_file.readline()
         if not line:
             break
 
-        mtched_train=[]
-        mtched_ad=[]
-
         uid = re.search(r"\s\d+", line)
 
-        for j in range(50):
-            p=mp.Process(target=mp_search_train, args=(uid.group(), train_queue1,ind,
-                                                       length,mtched_train,))
+        search_queue.put(uid.group())
 
-        p.start();
-        p.join()
+    p.close()
+    p.join()
 
-        '''
-        for j in range(len(train_queue1)):
-            if uid.group()==train_queue1[j][1]:
-                mtched_train=train_queue1[j][1]
-                del train_queue1[j]
-        '''
-
-        if mtched_train:
-            train_users_file.write(line)
-            '''
-            for j in range(mp.cpu_count()):
-                search_ad_pool.apply_async(mp_search_ad, args=(mtched_train[0], i % 2))
-    
-            search_ad_pool.close()
-            search_ad_pool.join()
-            '''
-            print('processing:')
-            n+=1
-            print(n)
-
-        '''
-        for j in range(len(train_samples)):
-            train_sample=train_samples[j]
-            print(feature_values)
-            #print(train_sample[1])
-           # if features[0][1]==train_sample[1]:
-            if 1:
-                train_users_file.write(line)
-                del train_samples[j]
-                break;
-        '''
-        time_end=time.time();
-        print('time:%s'%(time_end-time_start))
-    train_users_file.close();
-
-    '''
-    for feature in features:
-        feature_name = re.findall(r"[a-zA-z]+\d?", feature);
-        feature_values = re.findall(r"\s\d+", feature);
-      #  for feature_value in feature_values:
-      #      feature_value = int(feature_value)
-        user.append([feature_name, feature_values])
-    '''
+    train_users_file.close()
 
 
